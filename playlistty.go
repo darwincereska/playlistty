@@ -222,73 +222,233 @@ func GenerateOAuthToken(service string) (*Config, error) {
 
 func ListPlaylists(service string) (config *Config) {
 	switch service {
-		case "spotify":
-			// Parse config file
-			config, err := ParseConfig(configFile)
-			if err != nil {
-				fmt.Printf("Error reading config: %v\n", err)
-				return nil
-			}
+	case "spotify":
+		// Parse config file
+		config, err := ParseConfig(configFile)
+		if err != nil {
+			fmt.Printf("Error reading config: %v\n", err)
+			return nil
+		}
 
-			// Create request URL for Spotify playlists endpoint
-			url := fmt.Sprintf("https://api.spotify.com/v1/users/%s/playlists", config.Spotify.UserID)
+		// Create request URL for Spotify playlists endpoint
+		url := fmt.Sprintf("https://api.spotify.com/v1/users/%s/playlists", config.Spotify.UserID)
+
+		// Create request
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			fmt.Printf("Error creating request: %v\n", err)
+			return nil
+		}
+
+		// Add authorization header
+		req.Header.Add("Authorization", "Bearer "+config.Spotify.APIKey)
+
+		// Make request
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("Error making request: %v\n", err)
+			return nil
+		}
+		defer resp.Body.Close()
+
+		// Parse response
+		var playlists struct {
+			Items []struct {
+				Name string `json:"name"`
+				ID   string `json:"id"`
+			} `json:"items"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&playlists); err != nil {
+			fmt.Printf("Error decoding response: %v\n", err)
+			return nil
+		}
+
+		// Print playlists
+		fmt.Println("Your Spotify playlists:")
+		for _, playlist := range playlists.Items {
+			fmt.Printf("- %s (ID: %s)\n", playlist.Name, playlist.ID)
+		}
+
+		return config
+
+	case "youtube":
+		// Parse config file
+		config, err := ParseConfig(configFile)
+		if err != nil {
+			fmt.Printf("Error reading config: %v\n", err)
+			return nil
+		}
+
+		// Create request URL for YouTube playlists endpoint
+		url := "https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true"
+
+		// Create request
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			fmt.Printf("Error creating request: %v\n", err)
+			return nil
+		}
+
+		// Add authorization header
+		req.Header.Add("Authorization", "Bearer "+config.YouTube.Token)
+
+		// Make request
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("Error making request: %v\n", err)
+			return nil
+		}
+		defer resp.Body.Close()
+
+		// Parse response
+		var playlists struct {
+			Items []struct {
+				Snippet struct {
+					Title string `json:"title"`
+				} `json:"snippet"`
+				Id string `json:"id"`
+			} `json:"items"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&playlists); err != nil {
+			fmt.Printf("Error decoding response: %v\n", err)
+			return nil
+		}
+
+		// Print playlists
+		fmt.Println("Your YouTube playlists:")
+		for _, playlist := range playlists.Items {
+			fmt.Printf("- %s (ID: %s)\n", playlist.Snippet.Title, playlist.Id)
+		}
+
+		return config
+
+	default:
+		fmt.Printf("Service %s not supported\n", service)
+		return nil
+	}
+}
+
+func ReadPlaylist(service string, playlist string) {
+	switch service {
+	case "spotify":
+		// Parse config file
+		config, err := ParseConfig(configFile)
+		if err != nil {
+			fmt.Printf("Error reading config: %v\n", err)
+			return
+		}
+
+		// Create request URL for Spotify playlist tracks endpoint
+		url := fmt.Sprintf("https://api.spotify.com/v1/playlists/%s", playlist)
+
+		// Create request
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			fmt.Printf("Error creating request: %v\n", err)
+			return
+		}
+
+		// Add authorization header
+		req.Header.Add("Authorization", "Bearer "+config.Spotify.APIKey)
+
+		// Make request
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("Error making request: %v\n", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Parse playlist response to get name
+		var playlistData struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&playlistData); err != nil {
+			fmt.Printf("Error decoding playlist response: %v\n", err)
+			return
+		}
+
+		// Get tracks URL
+		tracksURL := fmt.Sprintf("https://api.spotify.com/v1/playlists/%s/tracks", playlist)
+
+		// Create tracks request
+		req, err = http.NewRequest("GET", tracksURL, nil)
+		if err != nil {
+			fmt.Printf("Error creating request: %v\n", err)
+			return
+		}
+
+		// Add authorization header
+		req.Header.Add("Authorization", "Bearer "+config.Spotify.APIKey)
+
+		// Make request
+		resp, err = client.Do(req)
+		if err != nil {
+			fmt.Printf("Error making request: %v\n", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Parse response
+		var tracks struct {
+			Items []struct {
+				Track struct {
+					Name    string `json:"name"`
+					Artists []struct {
+						Name string `json:"name"`
+					} `json:"artists"`
+				} `json:"track"`
+			} `json:"items"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&tracks); err != nil {
+			fmt.Printf("Error decoding response: %v\n", err)
+			return
+		}
+
+		// Print tracks
+		fmt.Printf("Tracks in playlist (%s):\n", playlistData.Name)
+		for _, item := range tracks.Items {
+			artists := make([]string, len(item.Track.Artists))
+			for i, artist := range item.Track.Artists {
+				artists[i] = artist.Name
+			}
+			fmt.Printf("- %s by %s\n", item.Track.Name, strings.Join(artists, ", "))
+		}
+	case "youtube":
+		// Parse config file
+		config, err := ParseConfig(configFile)
+		if err != nil {
+			fmt.Printf("Error reading config: %v\n", err)
+			return
+		}
+
+		var allVideos []struct {
+			Snippet struct {
+				Title    string `json:"title"`
+				VideoId  string `json:"resourceId.videoId"`
+				Position int    `json:"position"`
+			} `json:"snippet"`
+		}
+
+		pageToken := ""
+		for {
+			// Create request URL for YouTube playlist tracks endpoint
+			url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=%s&maxResults=50", playlist)
+			if pageToken != "" {
+				url += "&pageToken=" + pageToken
+			}
 
 			// Create request
 			req, err := http.NewRequest("GET", url, nil)
 			if err != nil {
 				fmt.Printf("Error creating request: %v\n", err)
-				return nil
-			}
-
-			// Add authorization header
-			req.Header.Add("Authorization", "Bearer "+config.Spotify.APIKey)
-
-			// Make request
-			client := &http.Client{}
-			resp, err := client.Do(req)
-			if err != nil {
-				fmt.Printf("Error making request: %v\n", err)
-				return nil
-			}
-			defer resp.Body.Close()
-
-			// Parse response
-			var playlists struct {
-				Items []struct {
-					Name string `json:"name"`
-					ID   string `json:"id"`
-				} `json:"items"`
-			}
-
-			if err := json.NewDecoder(resp.Body).Decode(&playlists); err != nil {
-				fmt.Printf("Error decoding response: %v\n", err)
-				return nil
-			}
-
-			// Print playlists
-			fmt.Println("Your Spotify playlists:")
-			for _, playlist := range playlists.Items {
-				fmt.Printf("- %s (ID: %s)\n", playlist.Name, playlist.ID)
-			}
-
-			return config
-
-		case "youtube":
-			// Parse config file
-			config, err := ParseConfig(configFile)
-			if err != nil {
-				fmt.Printf("Error reading config: %v\n", err)
-				return nil
-			}
-
-			// Create request URL for YouTube playlists endpoint
-			url := "https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true"
-
-			// Create request
-			req, err := http.NewRequest("GET", url, nil)
-			if err != nil {
-				fmt.Printf("Error creating request: %v\n", err)
-				return nil
+				return
 			}
 
 			// Add authorization header
@@ -299,41 +459,43 @@ func ListPlaylists(service string) (config *Config) {
 			resp, err := client.Do(req)
 			if err != nil {
 				fmt.Printf("Error making request: %v\n", err)
-				return nil
+				return
 			}
 			defer resp.Body.Close()
 
 			// Parse response
-			var playlists struct {
-				Items []struct {
+			var videos struct {
+				NextPageToken string `json:"nextPageToken"`
+				Items         []struct {
 					Snippet struct {
-						Title string `json:"title"`
+						Title    string `json:"title"`
+						VideoId  string `json:"resourceId.videoId"`
+						Position int    `json:"position"`
 					} `json:"snippet"`
-					Id string `json:"id"`
 				} `json:"items"`
 			}
 
-			if err := json.NewDecoder(resp.Body).Decode(&playlists); err != nil {
+			if err := json.NewDecoder(resp.Body).Decode(&videos); err != nil {
 				fmt.Printf("Error decoding response: %v\n", err)
-				return nil
+				return
 			}
 
-			// Print playlists
-			fmt.Println("Your YouTube playlists:")
-			for _, playlist := range playlists.Items {
-				fmt.Printf("- %s (ID: %s)\n", playlist.Snippet.Title, playlist.Id)
+			allVideos = append(allVideos, videos.Items...)
+
+			if videos.NextPageToken == "" {
+				break
 			}
+			pageToken = videos.NextPageToken
+		}
 
-			return config
-
+		// Print videos
+		fmt.Printf("Videos in playlist:\n")
+		for _, item := range allVideos {
+			fmt.Printf("- %s (Position: %d)\n", item.Snippet.Title, item.Snippet.Position)
+		}
 	default:
 		fmt.Printf("Service %s not supported\n", service)
-		return nil
 	}
-}
-
-func ReadPlaylist(service string, playlist string) {
-
 }
 
 func UpdatePlaylist(service string, playlist string) {
@@ -370,14 +532,12 @@ func main() {
 	// var hostKey string
 	switch flags.Service {
 	case "spotify":
-		// hostKey = config.Spotify.APIKey
 		ListPlaylists("spotify")
-		// fmt.Printf("using %s API KEY: %s\n", flags.Service, hostKey)
+		// ReadPlaylist("spotify", "2l2L7lKGrdLC6TXcPLdfKv")
 	case "yt":
-		// hostKey = config.YouTube.Token
-		// 
-		ListPlaylists("youtube")
-		// fmt.Printf("using %s API KEY: %s\n", flags.Service, hostKey)
+		// ListPlaylists("youtube")
+		ReadPlaylist("youtube", "PLe0T9j3Sn3hnvtiIxpfx2a0SIy84VSSl7")
+
 	}
 
 }
