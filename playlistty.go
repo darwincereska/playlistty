@@ -13,6 +13,7 @@ import (
 	"strings"
 	// "time"
 )
+
 const configFile = "config/config.yml"
 
 type Config struct {
@@ -25,12 +26,12 @@ type Config struct {
 	YouTube struct {
 		ClientID     string `yaml:"client_id"`
 		ClientSecret string `yaml:"client_secret"`
-		Token string `yaml:"token"`
+		Token        string `yaml:"token"`
 	} `yaml:"youtube"`
 }
 type Flags struct {
-	Service    string
-	ConfigPath string
+	Service      string
+	ConfigPath   string
 	OAuthService string
 }
 
@@ -142,11 +143,12 @@ func GetSpotifyAPIKey(client string, secret string) {
 
 	fmt.Println("Successfully updated Spotify API key in config.yml")
 }
+
 func GenerateOAuthToken(service string) (*Config, error) {
 	// First read config to get client credentials
 	configData, err := os.ReadFile(configFile)
 	if err != nil {
-		return nil, fmt.Errorf("error reading config: %v", err) 
+		return nil, fmt.Errorf("error reading config: %v", err)
 	}
 
 	var config Config
@@ -160,17 +162,36 @@ func GenerateOAuthToken(service string) (*Config, error) {
 		gConfig := &oauth2.Config{
 			ClientID:     config.YouTube.ClientID,
 			ClientSecret: config.YouTube.ClientSecret,
-			RedirectURL: "http://localhost:3000/callback",
-			Scopes: []string{"https://www.googleapis.com/auth/youtube"},
-			Endpoint: google.Endpoint,
+			RedirectURL:  "http://localhost:3000/callback",
+			Scopes:       []string{"https://www.googleapis.com/auth/youtube"},
+			Endpoint:     google.Endpoint,
 		}
 
-		authURL := gConfig.AuthCodeURL("state")
-		fmt.Printf("Visit this URL to get an authorization code:\n%v\n", authURL)
+		// Start HTTP server to handle the OAuth callback
+		codeChan := make(chan string)
+		srv := &http.Server{Addr: ":3000"}
 
-		var code string
-		fmt.Print("Enter the authorization code: ")
-		fmt.Scan(&code)
+		http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+			code := r.URL.Query().Get("code")
+			codeChan <- code
+			fmt.Fprintf(w, "Authorization successful! You can close this window.")
+			go func() {
+				srv.Shutdown(context.Background())
+			}()
+		})
+
+		go func() {
+			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+				fmt.Printf("HTTP server error: %v\n", err)
+			}
+		}()
+
+		authURL := gConfig.AuthCodeURL("state")
+		fmt.Printf("Opening browser for authorization...\n")
+		fmt.Printf("Please visit this URL to authorize: %v\n", authURL)
+
+		// Wait for the authorization code
+		code := <-codeChan
 
 		ctx := context.Background()
 		token, err := gConfig.Exchange(ctx, code)
@@ -191,12 +212,136 @@ func GenerateOAuthToken(service string) (*Config, error) {
 			return nil, fmt.Errorf("error writing config: %v", err)
 		}
 
-		fmt.Println("Successfully updated YouTube token in config.yml")
+		fmt.Printf("Sucessfully added YouTube token in: %s\n", configFile)
 		return &config, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported service: %s", service)
 	}
+}
+
+func ListPlaylists(service string) (config *Config) {
+	switch service {
+		case "spotify":
+			// Parse config file
+			config, err := ParseConfig(configFile)
+			if err != nil {
+				fmt.Printf("Error reading config: %v\n", err)
+				return nil
+			}
+
+			// Create request URL for Spotify playlists endpoint
+			url := fmt.Sprintf("https://api.spotify.com/v1/users/%s/playlists", config.Spotify.UserID)
+
+			// Create request
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				fmt.Printf("Error creating request: %v\n", err)
+				return nil
+			}
+
+			// Add authorization header
+			req.Header.Add("Authorization", "Bearer "+config.Spotify.APIKey)
+
+			// Make request
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Printf("Error making request: %v\n", err)
+				return nil
+			}
+			defer resp.Body.Close()
+
+			// Parse response
+			var playlists struct {
+				Items []struct {
+					Name string `json:"name"`
+					ID   string `json:"id"`
+				} `json:"items"`
+			}
+
+			if err := json.NewDecoder(resp.Body).Decode(&playlists); err != nil {
+				fmt.Printf("Error decoding response: %v\n", err)
+				return nil
+			}
+
+			// Print playlists
+			fmt.Println("Your Spotify playlists:")
+			for _, playlist := range playlists.Items {
+				fmt.Printf("- %s (ID: %s)\n", playlist.Name, playlist.ID)
+			}
+
+			return config
+
+		case "youtube":
+			// Parse config file
+			config, err := ParseConfig(configFile)
+			if err != nil {
+				fmt.Printf("Error reading config: %v\n", err)
+				return nil
+			}
+
+			// Create request URL for YouTube playlists endpoint
+			url := "https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true"
+
+			// Create request
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				fmt.Printf("Error creating request: %v\n", err)
+				return nil
+			}
+
+			// Add authorization header
+			req.Header.Add("Authorization", "Bearer "+config.YouTube.Token)
+
+			// Make request
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Printf("Error making request: %v\n", err)
+				return nil
+			}
+			defer resp.Body.Close()
+
+			// Parse response
+			var playlists struct {
+				Items []struct {
+					Snippet struct {
+						Title string `json:"title"`
+					} `json:"snippet"`
+					Id string `json:"id"`
+				} `json:"items"`
+			}
+
+			if err := json.NewDecoder(resp.Body).Decode(&playlists); err != nil {
+				fmt.Printf("Error decoding response: %v\n", err)
+				return nil
+			}
+
+			// Print playlists
+			fmt.Println("Your YouTube playlists:")
+			for _, playlist := range playlists.Items {
+				fmt.Printf("- %s (ID: %s)\n", playlist.Snippet.Title, playlist.Id)
+			}
+
+			return config
+
+	default:
+		fmt.Printf("Service %s not supported\n", service)
+		return nil
+	}
+}
+
+func ReadPlaylist(service string, playlist string) {
+
+}
+
+func UpdatePlaylist(service string, playlist string) {
+
+}
+
+func CreatePlaylist(service string, title string) {
+
 }
 
 func main() {
@@ -213,25 +358,26 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error parsing config: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	switch flags.OAuthService {
 	case "yt":
 		GenerateOAuthToken("youtube")
-	}
-	
-	
-	// Get api keys based on service
-	var hostKey string
-	switch flags.Service {
 	case "spotify":
 		GetSpotifyAPIKey(config.Spotify.ClientID, config.Spotify.ClientSecret)
-		hostKey = config.Spotify.APIKey
-		// ListPlaylists("spotify")
-		fmt.Printf("using %s API KEY: %s\n", flags.Service, hostKey)
-	case "yt":
-		hostKey = config.YouTube.Token
-		fmt.Printf("using %s API KEY: %s\n", flags.Service, hostKey)
 	}
-	
+
+	// Get api keys based on service
+	// var hostKey string
+	switch flags.Service {
+	case "spotify":
+		// hostKey = config.Spotify.APIKey
+		ListPlaylists("spotify")
+		// fmt.Printf("using %s API KEY: %s\n", flags.Service, hostKey)
+	case "yt":
+		// hostKey = config.YouTube.Token
+		// 
+		ListPlaylists("youtube")
+		// fmt.Printf("using %s API KEY: %s\n", flags.Service, hostKey)
+	}
 
 }
