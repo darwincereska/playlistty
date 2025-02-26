@@ -34,31 +34,191 @@ type Flags struct {
 	ConfigPath   string
 	OAuthService string
 }
+type App struct {
+	HostService string
+	HostValidated bool
+	HostPlaylist string
+	TargetService string
+	CreateNewPlaylist bool
+	TargetName string
+	TargetID string
+}
+
+
+func Run(service string) *App {
+	app := &App{}
+	platforms := []string{"spotify","youtube"}
+	fmt.Println("Welcome to playlistty!")
+	// Checks for config file
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		err := os.MkdirAll(storageDir, 0755)
+		if err != nil {
+			fmt.Printf("Error creating config directory: %v\n", err)
+			return app
+		}
+
+		// Create empty config struct
+		config := Config{}
+
+		// Marshal to YAML 
+		data, err := yaml.Marshal(&config)
+		if err != nil {
+			fmt.Printf("Error creating config file: %v\n", err)
+			return app
+		}
+
+		// Write config file
+		err = os.WriteFile(configFile, data, 0644)
+		if err != nil {
+			fmt.Printf("Error writing config file: %v\n", err)
+			return app
+		}
+
+		fmt.Printf("Created new config file: %s\n", configFile)
+	}
+	switch service {
+	case "spotify":
+		app.HostService = "spotify"
+	case "youtube":
+		app.HostService = "youtube"
+	}
+	
+	// Signin
+	ValidateToken(app.HostService)
+	app.HostValidated = true
+	
+	// List playlists
+	ListPlaylists(app.HostService)
+	
+	// Choose playlist
+	fmt.Printf("\nEnter Playlist id: ")
+	fmt.Scan(&app.HostPlaylist)
+	
+	// Ask for target platform
+	fmt.Println("\nWhat platform do you want to import to?")
+	for i, platform := range platforms {
+		fmt.Printf("%d. %s\n", i+1, platform)
+	}
+	var choice int
+	fmt.Printf("Enter number 1-%d: ", len(platforms))
+	fmt.Scanln(&choice)
+	if choice < 1 || choice > len(platforms) {
+		fmt.Println("Invalid choice")
+		return app
+	}
+	app.TargetService = platforms[choice-1]
+	
+	// Read and parse host playlist
+	fmt.Printf("Parsing playlist: %s\n", app.HostPlaylist)
+	ReadPlaylist(app.HostService, app.HostPlaylist)
+	
+	// ask to create or use existing playlist
+	fmt.Println("Do you want to create a new playlist?")
+	fmt.Println("1. Yes")
+	fmt.Println("2. No")
+	var CreateNewPlaylist int
+	fmt.Scan(&CreateNewPlaylist)
+	switch CreateNewPlaylist {
+	case 1:
+		app.CreateNewPlaylist = true
+	case 2:
+		app.CreateNewPlaylist = false
+	}
+	switch app.CreateNewPlaylist {
+	case true:
+		fmt.Printf("Provide a name for the playlist: ")
+		fmt.Scan(&app.TargetName)
+		fmt.Println("Playlist will default to private")
+		CreatePlaylist(app.TargetService, app.TargetName, "Made with Playlistty", false)
+	}
+	fmt.Println("WARNING IT WILL CLEAR PLAYLIST")
+	fmt.Println("Choose target playlist:")
+	ListPlaylists(app.TargetService)
+	fmt.Printf("\nEnter Playlist id: ")
+	fmt.Scan(&app.TargetID)
+	ClearPlaylist(app.TargetService, app.TargetID)
+	fmt.Printf("Transferring playlist: %s\n", app.TargetID)
+	
+	// Update playlist
+	UpdatePlaylist(app.TargetService, app.TargetID, app.TargetService, app.HostPlaylist)
+	return app
+}
+
+func Setup() {
+	
+}
+
+func ValidateToken(service string) {
+	switch service {
+	case "spotify":
+		// Parse config file
+		config, err := ParseConfig(configFile)
+		if err != nil {
+			fmt.Printf("Error reading config: %v\n", err)
+			return
+		}
+	
+		// Test token by making a request
+		url := "https://api.spotify.com/v1/me"
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			fmt.Printf("Error creating request: %v\n", err)
+			return
+		}
+	
+		req.Header.Add("Authorization", "Bearer "+config.Spotify.Token)
+	
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("Error making request: %v\n", err)
+			return
+		}
+		defer resp.Body.Close()
+	
+		if resp.StatusCode == 200 {
+			fmt.Println("Token is valid")
+			return
+		} else {
+			GenerateOAuthToken("spotify") 
+			return
+		}
+	case "youtube":
+	}
+}
 
 func ParseFlags() (*Flags, error) {
 	flags := &Flags{}
 	services := []string{"spotify", "yt"}
 	// Define flags
-	flag.StringVar(&flags.Service, "service", "", "Service to use $(services)")
+	flag.StringVar(&flags.Service, "service", "", "spotify/yt")
 	flag.StringVar(&flags.ConfigPath, "config", configFile, "Path to config file")
 	flag.StringVar(&flags.OAuthService, "oauth", "", "Generate OAuth Token for service")
+	helpFlag := flag.Bool("help", false, "Shows help screen")
 	// Parse flags
 	flag.Parse()
-
-	// Validate service flag
-	found := false
-	for _, service := range services {
-		if flags.Service == service {
-			found = true
-			break
+	if flags.Service != ""  || flags.OAuthService != "" {
+		// Validate service flag
+		found := false
+		for _, service := range services {
+			if flags.Service == service {
+				found = true
+				break
+			}
+			if flags.OAuthService == service {
+				found = true
+				break
+			}
 		}
-		if flags.OAuthService == service {
-			found = true
-			break
+		if !found {
+			return nil, fmt.Errorf("invalid service: must be one of %v", services)
 		}
 	}
-	if !found {
-		return nil, fmt.Errorf("invalid service: must be one of %v", services)
+	switch *helpFlag {
+	case true:
+		flag.Usage()
+	case flags.Service != "" && *helpFlag == false:
+		flag.Usage()
 	}
 
 	return flags, nil
@@ -78,71 +238,6 @@ func ParseConfig(configPath string) (*Config, error) {
 	}
 	return &config, nil
 }
-
-// func GetSpotifyAPIKey(client string, secret string) {
-// 	// Create the request URL and data
-// 	url := "https://accounts.spotify.com/api/token"
-// 	body := fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", client, secret)
-
-// 	// Create the HTTP request
-// 	req, err := http.NewRequest("POST", url, strings.NewReader(body))
-// 	if err != nil {
-// 		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
-// 		return
-// 	}
-
-// 	// Set headers
-// 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-// 	// Make the request
-// 	httpClient := &http.Client{}
-// 	resp, err := httpClient.Do(req)
-// 	if err != nil {
-// 		fmt.Fprintf(os.Stderr, "Error making request: %v\n", err)
-// 		return
-// 	}
-// 	defer resp.Body.Close()
-
-// 	// Parse the response
-// 	var tokenResp struct {
-// 		AccessToken string `json:"access_token"`
-// 	}
-// 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-// 		fmt.Fprintf(os.Stderr, "Error decoding response: %v\n", err)
-// 		return
-// 	}
-
-// 	// Read existing config
-// 	configData, err := os.ReadFile(configFile)
-// 	if err != nil {
-// 		fmt.Fprintf(os.Stderr, "Error reading config file: %v\n", err)
-// 		return
-// 	}
-
-// 	// Parse existing config
-// 	var config Config
-// 	if err := yaml.Unmarshal(configData, &config); err != nil {
-// 		fmt.Fprintf(os.Stderr, "Error parsing config file: %v\n", err)
-// 		return
-// 	}
-
-// 	// Update API key
-// 	config.Spotify.APIKey = tokenResp.AccessToken
-
-// 	// Write updated config back to file
-// 	newConfigData, err := yaml.Marshal(&config)
-// 	if err != nil {
-// 		fmt.Fprintf(os.Stderr, "Error marshaling config: %v\n", err)
-// 		return
-// 	}
-
-// 	if err := os.WriteFile(configFile, newConfigData, 0644); err != nil {
-// 		fmt.Fprintf(os.Stderr, "Error writing config file: %v\n", err)
-// 		return
-// 	}
-
-// 	fmt.Println("Successfully updated Spotify API key in config.yml")
-// }
 
 func GenerateOAuthToken(service string) (*Config, error) {
 	// First read config to get client credentials
@@ -644,7 +739,7 @@ func UpdatePlaylist(service string, playlist string, mode string, trackID string
 			} else {
 				fmt.Printf("Error adding track to playlist: %s\n", resp.Status)
 			}
-		case "playlist-spotify":
+		case "spotify":
 			// Parse config file
 			config, err := ParseConfig(configFile)
 			if err != nil {
@@ -850,9 +945,7 @@ func CreatePlaylist(service string, title string, description string, public boo
 			return
 		}
 		defer resp.Body.Close()		
-		
-		
-		
+				
 	}
 }
 
@@ -928,7 +1021,6 @@ func SearchSong(service string, song string, artist string) string {
 	return ""
 }
 
-
 func main() {
 	// parse flags
 	flags, err := ParseFlags()
@@ -950,21 +1042,12 @@ func main() {
 	case "spotify":
 		GenerateOAuthToken("spotify")
 	}
-
-	// Get api keys based on service
-	// var hostKey string
+	
 	switch flags.Service {
 	case "spotify":
-		// ListPlaylists("spotify")
-		// ReadPlaylist("spotify", "2l2L7lKGrdLC6TXcPLdfKv")
-		
-		// ClearPlaylist("spotify", "0wgtZR9s2hlYOZVDc3VrYa")
-		UpdatePlaylist("spotify", "0wgtZR9s2hlYOZVDc3VrYa", "playlist-spotify", "2l2L7lKGrdLC6TXcPLdfKv")
-		
-	case "yt":
-		// ListPlaylists("youtube")
-		ReadPlaylist("youtube", "PLe0T9j3Sn3hnvtiIxpfx2a0SIy84VSSl7")
-
+		Run("spotify")
+	case "youtube":
+		Run("youtube")
 	}
 
 }
