@@ -1,10 +1,10 @@
 # Playlistty
 
-Playlistty is a command-line tool for transferring playlists between music streaming services. Currently supports Spotify and YouTube.
+Playlistty is a command-line tool for transferring playlists between music streaming services. Currently supports Spotify and YouTube Music.
 
 ## Features
 
-- Transfer playlists between Spotify and YouTube
+- Transfer playlists between Spotify and YouTube Music
 - OAuth2 authentication for secure access
 - List all playlists from connected accounts
 - Create new playlists
@@ -51,7 +51,7 @@ playlistty -oauth yt
 # Transfer from Spotify
 playlistty -service spotify
 
-# Transfer from YouTube
+# Transfer from YouTube Music
 playlistty -service yt
 
 # Show help
@@ -60,7 +60,7 @@ playlistty -help
 
 ## How It Works
 
-1. Choose source service (Spotify/YouTube)
+1. Choose source service (Spotify/YouTube Music)
 2. Select source playlist
 3. Choose destination service
 4. Create new playlist or select existing one
