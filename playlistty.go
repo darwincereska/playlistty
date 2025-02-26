@@ -17,7 +17,6 @@ const configFile = storageDir + "/config.yml"
 
 type Config struct {
 	Spotify struct {
-		APIKey       string `yaml:"api_key"`
 		UserID       string `yaml:"user_id"`
 		ClientID     string `yaml:"client_id"`
 		ClientSecret string `yaml:"client_secret"`

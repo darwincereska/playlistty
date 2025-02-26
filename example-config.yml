@@ -1,0 +1,9 @@
+spotify:
+  user_id: find-from-spotify-profile
+  client_id: 
+  client_secret:
+  token: will-auto-generate
+youtube:
+  client_id:
+  client_secret:
+  token: will-auto-generate
