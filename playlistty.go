@@ -907,42 +907,30 @@ func UpdatePlaylist(service string, playlist string, mode string, folder string,
 				}
 			}
 
-			// Add tracks in batches of 25
+			// Add tracks one at a time
 			url := "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet"
 			client := &http.Client{}
 
-			// Create batch request body with up to 25 videos
-			for i := 0; i < len(videoIds); i += 25 {
-				end := i + 25
-				if end > len(videoIds) {
-					end = len(videoIds)
-				}
-
-				batch := make([]interface{}, 0)
-				for _, videoId := range videoIds[i:end] {
-					batch = append(batch, map[string]interface{}{
-						"snippet": map[string]interface{}{
-							"playlistId": playlist,
-							"resourceId": map[string]string{
-								"kind":    "youtube#video",
-								"videoId": videoId,
-							},
+			for _, videoId := range videoIds {
+				requestBody := map[string]interface{}{
+					"snippet": map[string]interface{}{
+						"playlistId": playlist,
+						"resourceId": map[string]string{
+							"kind":    "youtube#video",
+							"videoId": videoId,
 						},
-					})
+					},
 				}
 
-				// Send single request with batch of videos
-				bodyJSON, err := json.Marshal(map[string]interface{}{
-					"items": batch,
-				})
+				bodyJSON, err := json.Marshal(requestBody)
 				if err != nil {
 					fmt.Printf("Error marshaling request body: %v\n", err)
-					continue 
+					continue
 				}
 
 				req, err := http.NewRequest("POST", url, strings.NewReader(string(bodyJSON)))
 				if err != nil {
-					fmt.Printf("Error creating request: %v\n", err) 
+					fmt.Printf("Error creating request: %v\n", err)
 					continue
 				}
 
@@ -957,9 +945,9 @@ func UpdatePlaylist(service string, playlist string, mode string, folder string,
 				defer resp.Body.Close()
 
 				if resp.StatusCode == 200 {
-					fmt.Printf("Added videos %d-%d\n", i+1, end)
+					fmt.Printf("Added video: %s\n", videoId)
 				} else {
-					fmt.Printf("Error adding videos %d-%d: %s\n", i+1, end, resp.Status)
+					fmt.Printf("Error adding video %s: %s\n", videoId, resp.Status)
 				}
 			}
 
@@ -1057,6 +1045,8 @@ func ClearPlaylist(service string, playlist string) {
 		}
 
 		fmt.Printf("Successfully cleared playlist\n")
+	case "youtube":
+		
 	}
 }
 
